@@ -32,6 +32,8 @@
     "dist",
     "js",
     "src",
+    "include",
+    "binding.gyp",
     "build/Release/*.node",
     "prebuilds/**/*",
     "README.md",
@@ -60,7 +62,7 @@
     "glass",
     "nsvisualeffectview"
   ],
-  "gypfile": false,
+  "gypfile": true,
   "os": [
     "darwin"
   ],

@@ -8,37 +8,21 @@
 #ifdef PLATFORM_OSX
 #import <AppKit/AppKit.h>
 
-// Dynamic subclass that forces the window to always report key appearance.
-// This prevents NSGlassEffectView from switching to its inactive visual state
-// when the window loses focus.
-static Class g_alwaysKeyWindowClass = nil;
+// Swizzle hasKeyAppearance in-place via method_setImplementation so the
+// window's isa pointer is never changed. This avoids breaking KVO teardown
+// (NSKVONotifying_* subclasses) which caused EXC_BREAKPOINT on app exit.
+static IMP g_originalHasKeyAppearance = NULL;
 
-static BOOL alwaysKeyAppearance(id self, SEL _cmd) {
+static BOOL alwaysYES(id self, SEL _cmd) {
   return YES;
 }
 
-static void ensureAlwaysKeyWindowClass(NSWindow *window) {
-  if (!window) return;
-
-  Class originalClass = object_getClass(window);
-  const char *subclassName = "LGAlwaysKeyWindow";
-
-  // Already swizzled
-  if (strcmp(class_getName(originalClass), subclassName) == 0) return;
-
-  if (!g_alwaysKeyWindowClass) {
-    g_alwaysKeyWindowClass = objc_allocateClassPair(originalClass, subclassName, 0);
-    if (!g_alwaysKeyWindowClass) {
-      g_alwaysKeyWindowClass = objc_getClass(subclassName);
-    } else {
-      class_addMethod(g_alwaysKeyWindowClass, @selector(hasKeyAppearance),
-                      (IMP)alwaysKeyAppearance, "B@:");
-      objc_registerClassPair(g_alwaysKeyWindowClass);
-    }
-  }
-
-  if (g_alwaysKeyWindowClass) {
-    object_setClass(window, g_alwaysKeyWindowClass);
+static void forceAlwaysKeyAppearance(NSWindow *window) {
+  if (!window || g_originalHasKeyAppearance) return; // only swizzle once
+  Class cls = object_getClass(window);
+  Method m = class_getInstanceMethod(cls, @selector(hasKeyAppearance));
+  if (m) {
+    g_originalHasKeyAppearance = method_setImplementation(m, (IMP)alwaysYES);
   }
 }
 
@@ -160,7 +144,7 @@ extern "C" int AddGlassEffectView(unsigned char *buffer, bool opaque) {
     // Force the window to always appear as key so glass doesn't change on blur
     NSWindow *win = container.window;
     if (win) {
-      ensureAlwaysKeyWindowClass(win);
+      forceAlwaysKeyAppearance(win);
     }
 
     // Add the glass view (positioned relative to background view if opaque, or below everything if not)

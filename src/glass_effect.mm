@@ -8,6 +8,40 @@
 #ifdef PLATFORM_OSX
 #import <AppKit/AppKit.h>
 
+// Dynamic subclass that forces the window to always report key appearance.
+// This prevents NSGlassEffectView from switching to its inactive visual state
+// when the window loses focus.
+static Class g_alwaysKeyWindowClass = nil;
+
+static BOOL alwaysKeyAppearance(id self, SEL _cmd) {
+  return YES;
+}
+
+static void ensureAlwaysKeyWindowClass(NSWindow *window) {
+  if (!window) return;
+
+  Class originalClass = object_getClass(window);
+  const char *subclassName = "LGAlwaysKeyWindow";
+
+  // Already swizzled
+  if (strcmp(class_getName(originalClass), subclassName) == 0) return;
+
+  if (!g_alwaysKeyWindowClass) {
+    g_alwaysKeyWindowClass = objc_allocateClassPair(originalClass, subclassName, 0);
+    if (!g_alwaysKeyWindowClass) {
+      g_alwaysKeyWindowClass = objc_getClass(subclassName);
+    } else {
+      class_addMethod(g_alwaysKeyWindowClass, @selector(hasKeyAppearance),
+                      (IMP)alwaysKeyAppearance, "B@:");
+      objc_registerClassPair(g_alwaysKeyWindowClass);
+    }
+  }
+
+  if (g_alwaysKeyWindowClass) {
+    object_setClass(window, g_alwaysKeyWindowClass);
+  }
+}
+
 // Simple registry so JS can still address a view by numeric id.
 static std::map<int, NSView *> g_glassViews;
 static int g_nextViewId = 0;
@@ -122,6 +156,12 @@ extern "C" int AddGlassEffectView(unsigned char *buffer, bool opaque) {
 
     // Ensure autoresize if we created a private glass view too
     glass.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+
+    // Force the window to always appear as key so glass doesn't change on blur
+    NSWindow *win = container.window;
+    if (win) {
+      ensureAlwaysKeyWindowClass(win);
+    }
 
     // Add the glass view (positioned relative to background view if opaque, or below everything if not)
     if (opaque && backgroundView) {
